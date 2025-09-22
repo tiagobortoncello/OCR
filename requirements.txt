@@ -3,4 +3,5 @@ easyocr
 pillow
 numpy
 opencv-python-headless
-
+pdf2image
+pdfplumber
