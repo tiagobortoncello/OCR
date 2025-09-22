@@ -22,7 +22,7 @@ def preprocess_image(pil_image):
     )
     coords = np.column_stack(np.where(img_bin > 0))
     if coords.size == 0:
-        return img_bin  # página em branco
+        return img_bin
     angle = cv2.minAreaRect(coords)[-1]
     if angle < -45:
         angle = -(90 + angle)
@@ -82,19 +82,29 @@ if uploaded_file:
                 st.subheader("📑 Texto extraído do PDF (nativo):")
                 st.text_area("Resultado", "\n\n".join(text_output), height=400)
             else:  # PDF escaneado
-                with st.spinner("PDF escaneado detectado. Convertendo páginas em imagens e aplicando OCR..."):
-                    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                    for i, page in enumerate(doc):
-                        pix = page.get_pixmap(dpi=300)
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                num_pages = doc.page_count
+
+                st.subheader("⚙️ Configurações de OCR do PDF escaneado")
+                start_page = st.number_input("Página inicial", min_value=1, max_value=num_pages, value=1)
+                end_page = st.number_input("Página final", min_value=1, max_value=num_pages, value=min(5, num_pages))
+
+                start_idx = int(start_page) - 1
+                end_idx = int(end_page)
+
+                with st.spinner("Processando páginas selecionadas..."):
+                    for i in range(start_idx, end_idx):
+                        page = doc[i]
+                        pix = page.get_pixmap(dpi=150)  # DPI reduzido
                         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                         processed_img = preprocess_image(img)
                         result = reader.readtext(processed_img, detail=0)
                         text_output.append(f"--- Página {i+1} ---\n" + "\n".join(result))
+                        st.text_area(f"Página {i+1}", "\n".join(result), height=200)
 
                 st.subheader("📑 Texto extraído do PDF (scan):")
-                st.text_area("Resultado", "\n\n".join(text_output), height=400)
+                st.text_area("Resultado completo", "\n\n".join(text_output), height=400)
 
-            # Download
             st.download_button(
                 label="📥 Baixar texto",
                 data="\n\n".join(text_output),
