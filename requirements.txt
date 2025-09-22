@@ -1,7 +1,2 @@
 streamlit
-easyocr
-pillow
-numpy
-opencv-python-headless
-pdfplumber
-PyMuPDF
+requests
