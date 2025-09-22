@@ -5,7 +5,7 @@ import numpy as np
 import cv2
 import io
 import pdfplumber
-from pdf2image import convert_from_bytes
+import fitz  # PyMuPDF
 
 st.set_page_config(page_title="OCR Inteligente", layout="centered")
 st.title("📄 OCR Inteligente: Imagem ou PDF")
@@ -21,6 +21,8 @@ def preprocess_image(pil_image):
         cv2.THRESH_BINARY, 11, 2
     )
     coords = np.column_stack(np.where(img_bin > 0))
+    if coords.size == 0:
+        return img_bin  # página em branco
     angle = cv2.minAreaRect(coords)[-1]
     if angle < -45:
         angle = -(90 + angle)
@@ -33,7 +35,6 @@ def preprocess_image(pil_image):
 
 # Escolha do tipo de arquivo
 file_type = st.radio("Escolha o tipo de arquivo", ("Imagem", "PDF"))
-
 uploaded_file = st.file_uploader("Carregue o arquivo", type=["png","jpg","jpeg","pdf"])
 
 if uploaded_file:
@@ -62,38 +63,41 @@ if uploaded_file:
     else:  # PDF
         if st.button("🔍 Extrair Texto do PDF"):
             pdf_bytes = uploaded_file.read()
+            text_output = []
 
-            # Tenta extrair texto diretamente (PDF nativo)
+            # Tenta PDF nativo primeiro
             with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-                text_pages = []
+                native_text_pages = []
                 is_scanned = False
                 for page in pdf.pages:
                     page_text = page.extract_text()
-                    if page_text:
-                        text_pages.append(page_text)
+                    if page_text and page_text.strip():
+                        native_text_pages.append(page_text)
                     else:
                         is_scanned = True
                         break
 
             if not is_scanned:  # PDF nativo
-                text = "\n\n".join(text_pages)
+                text_output = native_text_pages
                 st.subheader("📑 Texto extraído do PDF (nativo):")
-                st.text_area("Resultado", text, height=400)
+                st.text_area("Resultado", "\n\n".join(text_output), height=400)
             else:  # PDF escaneado
                 with st.spinner("PDF escaneado detectado. Convertendo páginas em imagens e aplicando OCR..."):
-                    pages = convert_from_bytes(pdf_bytes, dpi=300)
-                    all_text = []
-                    for i, page in enumerate(pages):
-                        processed_page = preprocess_image(page)
-                        result = reader.readtext(processed_page, detail=0)
-                        all_text.append(f"--- Página {i+1} ---\n" + "\n".join(result))
-                    text = "\n\n".join(all_text)
-                st.subheader("📑 Texto extraído do PDF (scan):")
-                st.text_area("Resultado", text, height=400)
+                    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                    for i, page in enumerate(doc):
+                        pix = page.get_pixmap(dpi=300)
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                        processed_img = preprocess_image(img)
+                        result = reader.readtext(processed_img, detail=0)
+                        text_output.append(f"--- Página {i+1} ---\n" + "\n".join(result))
 
+                st.subheader("📑 Texto extraído do PDF (scan):")
+                st.text_area("Resultado", "\n\n".join(text_output), height=400)
+
+            # Download
             st.download_button(
                 label="📥 Baixar texto",
-                data=text,
+                data="\n\n".join(text_output),
                 file_name="ocr_resultado.txt",
                 mime="text/plain"
             )
