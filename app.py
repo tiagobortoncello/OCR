@@ -1,45 +1,42 @@
 import streamlit as st
-import pytesseract
+import easyocr
 from PIL import Image
 import fitz  # PyMuPDF
+import numpy as np
 
-# --- Configuração do Tesseract ---
-# Esta linha é crucial para o ambiente do Streamlit Cloud.
-# Ela informa ao pytesseract a localização exata do executável do Tesseract.
-pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
+# --- Configuração do EasyOCR ---
+# Cria uma instância do leitor de OCR.
+# 'gpu=False' garante que ele funcione na CPU no Streamlit Cloud.
+# 'lang_list=['pt']' especifica o idioma português.
+reader = easyocr.Reader(['pt'], gpu=False)
 
 def ocr_pdf(uploaded_file):
     """
-    Processa um PDF escaneado e extrai o texto de cada página usando PyMuPDF
-    e Pytesseract.
+    Processa um PDF escaneado e extrai o texto usando PyMuPDF e EasyOCR.
     """
     text_data = ""
     
-    # Abre o arquivo PDF com PyMuPDF (fitz)
     try:
         pdf_document = fitz.open(stream=uploaded_file.read(), filetype="pdf")
     except Exception as e:
         st.error(f"Não foi possível abrir o arquivo PDF. Erro: {e}")
         return ""
 
-    # Itera por cada página do PDF
     for i, page in enumerate(pdf_document):
-        # Renderiza a página como uma imagem (pixmap) com alta resolução (300 DPI)
+        # Renderiza a página como uma imagem (pixmap) com alta resolução
         pixmap = page.get_pixmap(dpi=300)
         
-        # Converte o pixmap para um objeto de imagem PIL (Pillow)
-        img = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
+        # Converte o pixmap para um array NumPy, que é o formato ideal para o EasyOCR
+        img = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width, pixmap.n)
 
-        # Converte a imagem para tons de cinza para otimizar o OCR
-        gray_image = img.convert("L")
+        # Usa o EasyOCR para extrair o texto
+        results = reader.readtext(img, detail=0)  # 'detail=0' retorna apenas o texto
         
-        # Aplica o OCR do Tesseract na imagem processada
-        # 'lang='por'' especifica o idioma português para maior precisão
-        text = pytesseract.image_to_string(gray_image, lang='por')
+        # Junta todas as linhas de texto em um único bloco
+        page_text = "\n".join(results)
         
-        text_data += f"\n--- Página {i+1} ---\n{text}\n"
+        text_data += f"\n--- Página {i+1} ---\n{page_text}\n"
 
-    # Fecha o documento PDF
     pdf_document.close()
     
     return text_data
@@ -52,7 +49,6 @@ st.markdown("Faça o upload de um PDF escaneado ou antigo para extrair o texto."
 uploaded_file = st.file_uploader("Escolha um arquivo PDF...", type="pdf")
 
 if uploaded_file is not None:
-    # Exibe uma mensagem de processamento enquanto a tarefa é executada
     with st.spinner("Processando o PDF... Isso pode levar alguns minutos dependendo do tamanho do arquivo."):
         extracted_text = ocr_pdf(uploaded_file)
     
@@ -61,7 +57,6 @@ if uploaded_file is not None:
         st.subheader("Texto Extraído:")
         st.text_area("Resultado", extracted_text, height=500)
         
-        # Botão para baixar o texto extraído como um arquivo
         st.download_button(
             label="Baixar texto extraído",
             data=extracted_text,
