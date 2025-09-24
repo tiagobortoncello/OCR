@@ -22,9 +22,10 @@ def correct_text_with_gemini(text, api_key):
         url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
         headers = {"Content-Type": "application/json"}
         prompt = (
-            "Você é um especialista em correção de textos extraídos de OCR de documentos antigos em português, "
-            "como jornais de Minas Gerais. Corrija o texto abaixo, consertando palavras mal interpretadas e mantendo o contexto original. "
-            "Retorne apenas o texto corrigido, sem explicações. Se o texto estiver correto, retorne-o como está. "
+            "Você é um especialista em correção de textos extraídos de OCR de jornais antigos em português, "
+            "como os de Minas Gerais, organizados em colunas. Corrija o texto abaixo, consertando palavras mal interpretadas "
+            "e mantendo o contexto original. O texto é lido coluna por coluna, de cima para baixo. "
+            "Retorne apenas o texto corrigido, sem explicações, preservando a estrutura de colunas com marcações claras. "
             "Evite adicionar ou remover informações que não estejam no texto original.\n\n"
             f"Texto para corrigir:\n{text}"
         )
@@ -44,9 +45,26 @@ def correct_text_with_gemini(text, api_key):
         st.warning(f"Erro ao corrigir o texto com Gemini: {e}")
         return text  # Retorna o texto original em caso de erro
 
+def split_image_into_columns(img, num_columns=2):
+    """
+    Divide a imagem em colunas para OCR.
+    """
+    height, width = img.shape[:2]
+    column_width = width // num_columns
+    columns = []
+    
+    for i in range(num_columns):
+        # Define as coordenadas da coluna
+        x_start = i * column_width
+        x_end = (i + 1) * column_width if i < num_columns - 1 else width
+        column_img = img[:, x_start:x_end]
+        columns.append(column_img)
+    
+    return columns
+
 def ocr_pdf(uploaded_file):
     """
-    Processa um PDF escaneado e extrai o texto usando PyMuPDF e EasyOCR.
+    Processa um PDF escaneado, extrai texto por colunas e retorna o texto organizado.
     """
     text_data = ""
     
@@ -72,11 +90,19 @@ def ocr_pdf(uploaded_file):
             # Libera o pixmap
             pixmap = None
             
-            # Extrai texto com EasyOCR
-            results = reader.readtext(img, detail=0, contrast_ths=0.3, batch_size=1)
+            # Divide a imagem em colunas (assumindo 2 colunas, comum em jornais)
+            columns = split_image_into_columns(img, num_columns=2)
             
-            # Junta o texto da página
-            page_text = "\n".join(results)
+            # Extrai texto de cada coluna
+            page_text = ""
+            for col_idx, column_img in enumerate(columns):
+                results = reader.readtext(column_img, detail=0, contrast_ths=0.3, batch_size=1)
+                column_text = "\n".join(results)
+                page_text += f"\n--- Coluna {col_idx + 1} ---\n{column_text}\n"
+                
+                # Libera a memória da coluna
+                column_img = None
+            
             text_data += f"\n--- Página {i+1} ---\n{page_text}\n"
             
             # Libera a imagem
@@ -91,7 +117,7 @@ def ocr_pdf(uploaded_file):
 
 # Interface Streamlit
 st.title("Leitor de OCR para PDFs Escaneados")
-st.markdown("Faça upload de um PDF escaneado (máximo 5 MB, preferencialmente com boa qualidade).")
+st.markdown("Faça upload de um PDF escaneado com layout em colunas (máximo 5 MB, preferencialmente com boa qualidade).")
 
 # Recupera a chave da API do secrets
 api_key = st.secrets.get("GEMINI_API_KEY", "")
