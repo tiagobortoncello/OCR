@@ -1,7 +1,12 @@
 import streamlit as st
 import pytesseract
 from PIL import Image
-import fitz  # O nome da biblioteca PyMuPDF que você importa
+import fitz  # PyMuPDF
+
+# --- Configuração do Tesseract ---
+# Esta linha é crucial para o ambiente do Streamlit Cloud.
+# Ela informa ao pytesseract a localização exata do executável do Tesseract.
+pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
 
 def ocr_pdf(uploaded_file):
     """
