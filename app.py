@@ -1,63 +1,45 @@
 import streamlit as st
-import base64
-import requests
+import pytesseract
+from PIL import Image
+from pdf2image import convert_from_bytes
+import io
 
-st.set_page_config(page_title="OCR Gemini API", layout="centered")
-st.title("📄 OCR com Gemini API")
+# Pode ser necessário configurar o caminho para o Tesseract no Streamlit Cloud
+# Mas para a maioria dos casos, não é preciso se estiver instalado corretamente.
+# pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
 
-api_key = st.text_input("Insira sua API Key do Gemini", type="password")
-uploaded_file = st.file_uploader("Carregue imagem ou PDF", type=["png","jpg","jpeg","pdf"])
+def ocr_pdf(uploaded_file):
+    """Processa um PDF escaneado e retorna o texto extraído."""
+    text_data = ""
+    
+    # Converte PDF para uma lista de imagens PIL
+    images = convert_from_bytes(uploaded_file.read(), dpi=300)
 
-if uploaded_file and api_key:
-    if st.button("🔍 Extrair Texto via Gemini API"):
-        with st.spinner("Enviando arquivo para a API Gemini..."):
-            try:
-                # Ler arquivo em bytes e converter para Base64
-                file_bytes = uploaded_file.read()
-                encoded_file = base64.b64encode(file_bytes).decode("utf-8")
+    for i, image in enumerate(images):
+        # Pré-processamento da imagem (exemplo básico)
+        processed_image = image.convert("L")  # Converte para tons de cinza
+        
+        # O Pytesseract pode receber a imagem diretamente
+        # O Tesseract faz um pré-processamento interno, mas o nosso melhora a precisão
+        text = pytesseract.image_to_string(processed_image, lang='por')
+        text_data += f"\n--- Página {i+1} ---\n{text}"
 
-                # Determinar formato do arquivo
-                if uploaded_file.type == "application/pdf":
-                    file_format = "PDF"
-                else:
-                    file_format = "IMAGE"
+    return text_data
 
-                # Montar payload correto para a API Gemini
-                payload = {
-                    "prompt": "Extrair todo o texto contido neste arquivo, mantendo a estrutura e separando páginas, se houver.",
-                    "contents": [
-                        {
-                            "type": "FILE",
-                            "format": file_format,
-                            "data": encoded_file
-                        }
-                    ]
-                }
+st.title("Leitor de OCR para PDFs Escaneados")
 
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={api_key}"
+uploaded_file = st.file_uploader("Escolha um PDF escaneado", type="pdf")
 
-                response = requests.post(url, json=payload)
-                if response.status_code == 200:
-                    data = response.json()
-                    # Dependendo do retorno da API, pode ser necessário ajustar o caminho para o texto
-                    # Geralmente: data['candidates'][0]['content'] ou algo similar
-                    text = ""
-                    if "candidates" in data and len(data["candidates"]) > 0:
-                        text = data["candidates"][0].get("content", "")
-                    else:
-                        text = str(data)
-
-                    st.subheader("📑 Texto extraído:")
-                    st.text_area("Resultado", text, height=400)
-
-                    st.download_button(
-                        label="📥 Baixar texto",
-                        data=text,
-                        file_name="ocr_resultado.txt",
-                        mime="text/plain"
-                    )
-                else:
-                    st.error(f"Erro na API: {response.status_code} - {response.text}")
-
-            except Exception as e:
-                st.error(f"Erro ao conectar com a API: {e}")
+if uploaded_file is not None:
+    st.info("Processando o PDF. Isso pode levar alguns minutos...")
+    extracted_text = ocr_pdf(uploaded_file)
+    
+    st.subheader("Texto Extraído:")
+    st.text_area("Resultado", extracted_text, height=500)
+    
+    st.download_button(
+        label="Baixar texto",
+        data=extracted_text,
+        file_name="texto_extraido.txt",
+        mime="text/plain"
+    )
