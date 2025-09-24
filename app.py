@@ -2,6 +2,8 @@ import streamlit as st
 import easyocr
 import fitz  # PyMuPDF
 import numpy as np
+import requests
+import json
 
 # Cache do EasyOCR para carregar o modelo uma vez
 @st.cache_resource
@@ -10,6 +12,37 @@ def init_ocr_reader():
 
 # Inicializa o leitor OCR
 reader = init_ocr_reader()
+
+# Função para corrigir texto usando a API do Gemini
+def correct_text_with_gemini(text, api_key):
+    """
+    Envia o texto extraído para a API do Gemini para correção.
+    """
+    try:
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        headers = {"Content-Type": "application/json"}
+        prompt = (
+            "Você é um especialista em correção de textos extraídos de OCR de documentos antigos em português, "
+            "como jornais de Minas Gerais. Corrija o texto abaixo, consertando palavras mal interpretadas e mantendo o contexto original. "
+            "Retorne apenas o texto corrigido, sem explicações. Se o texto estiver correto, retorne-o como está. "
+            "Evite adicionar ou remover informações que não estejam no texto original.\n\n"
+            f"Texto para corrigir:\n{text}"
+        )
+        data = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2000}
+        }
+        
+        response = requests.post(f"{url}?key={api_key}", headers=headers, json=data)
+        response.raise_for_status()
+        
+        result = response.json()
+        corrected_text = result["candidates"][0]["content"]["parts"][0]["text"]
+        return corrected_text.strip()
+    
+    except Exception as e:
+        st.warning(f"Erro ao corrigir o texto com Gemini: {e}")
+        return text  # Retorna o texto original em caso de erro
 
 def ocr_pdf(uploaded_file):
     """
@@ -24,7 +57,7 @@ def ocr_pdf(uploaded_file):
         return ""
 
     # Limita o número de páginas
-    max_pages = 5  # Reduzido para maior estabilidade
+    max_pages = 5
     if len(pdf_document) > max_pages:
         st.warning(f"O PDF tem {len(pdf_document)} páginas. Processando apenas as primeiras {max_pages} para evitar sobrecarga.")
     
@@ -39,7 +72,7 @@ def ocr_pdf(uploaded_file):
             # Libera o pixmap
             pixmap = None
             
-            # Extrai texto com EasyOCR, ajustando para PDFs antigos
+            # Extrai texto com EasyOCR
             results = reader.readtext(img, detail=0, contrast_ths=0.3, batch_size=1)
             
             # Junta o texto da página
@@ -60,10 +93,13 @@ def ocr_pdf(uploaded_file):
 st.title("Leitor de OCR para PDFs Escaneados")
 st.markdown("Faça upload de um PDF escaneado (máximo 5 MB, preferencialmente com boa qualidade).")
 
+# Recupera a chave da API do secrets
+api_key = st.secrets.get("GEMINI_API_KEY", "")
+
 uploaded_file = st.file_uploader("Escolha um PDF...", type="pdf")
 
 if uploaded_file is not None:
-    if uploaded_file.size > 5 * 1024 * 1024:  # Limite reduzido para 5 MB
+    if uploaded_file.size > 5 * 1024 * 1024:
         st.error("O arquivo é muito grande. Envie um PDF com menos de 5 MB.")
     else:
         with st.spinner("Processando o PDF... Pode levar alguns minutos."):
@@ -71,11 +107,26 @@ if uploaded_file is not None:
         
         if extracted_text:
             st.success("Texto extraído com sucesso!")
-            st.subheader("Texto Extraído:")
-            st.text_area("Resultado", extracted_text, height=300)
+            st.subheader("Texto Extraído (OCR):")
+            st.text_area("Resultado do OCR", extracted_text, height=300)
+            
+            if api_key:
+                with st.spinner("Corrigindo texto com Gemini..."):
+                    corrected_text = correct_text_with_gemini(extracted_text, api_key)
+                st.subheader("Texto Corrigido (Gemini):")
+                st.text_area("Resultado Corrigido", corrected_text, height=300)
+                
+                st.download_button(
+                    label="Baixar texto corrigido",
+                    data=corrected_text,
+                    file_name="texto_do_pdf_corrigido.txt",
+                    mime="text/plain"
+                )
+            else:
+                st.warning("Chave da API do Gemini não encontrada no secrets. Adicione 'GEMINI_API_KEY' no Streamlit Cloud.")
             
             st.download_button(
-                label="Baixar texto extraído",
+                label="Baixar texto extraído (OCR)",
                 data=extracted_text,
                 file_name="texto_do_pdf.txt",
                 mime="text/plain"
