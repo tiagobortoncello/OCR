@@ -1,118 +1,128 @@
 import streamlit as st
 from PIL import Image
-import requests
 from io import BytesIO
 import fitz  # PyMuPDF
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import gc
 
-# Configurações
-MODEL_NAME = "Qwen/Qwen2-0.5B-Instruct"
-HF_TOKEN = st.secrets.get("HF_API_TOKEN", "")
-
-if not HF_TOKEN:
-    st.error("❌ HF_API_TOKEN não configurado.")
-    st.stop()
-
+# --- OCR (mantido igual) ---
 def get_ocr_reader():
     import easyocr
     return easyocr.Reader(['pt', 'en'], gpu=False, verbose=False)
 
-def query_qwen(prompt):
-    API_URL = f"https://api-inference.huggingface.co/models/{MODEL_NAME}"
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    payload = {
-        "inputs": prompt,
-        "parameters": {"max_new_tokens": 512, "temperature": 0.6}
-    }
-    try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-        if response.status_code == 200:
-            return response.json()[0]["generated_text"]
-        else:
-            st.error(f"Erro na API: {response.status_code}")
-            return None
-    except Exception as e:
-        st.error(f"Timeout ou erro de rede: {str(e)}")
-        return None
-
 def ocr_with_columns(pil_img, num_columns=2):
-    """
-    Divide a imagem em colunas verticais e aplica OCR em cada uma (da esquerda para direita).
-    """
     reader = get_ocr_reader()
     width, height = pil_img.size
-    column_width = width // num_columns
-
-    full_text = []
+    col_width = width // num_columns
+    texts = []
     for i in range(num_columns):
-        left = i * column_width
-        right = (i + 1) * column_width if i < num_columns - 1 else width
-        column_img = pil_img.crop((left, 0, right, height))
+        left = i * col_width
+        right = width if i == num_columns - 1 else (i + 1) * col_width
+        col = pil_img.crop((left, 0, right, height))
+        buf = BytesIO()
+        col.save(buf, format='PNG')
+        results = reader.readtext(buf.getvalue(), detail=0, paragraph=True)
+        txt = " ".join(results).strip()
+        if txt:
+            texts.append(txt)
+    return " ".join(texts)
 
-        # Converte para bytes
-        img_bytes = BytesIO()
-        column_img.save(img_bytes, format='PNG')
-        results = reader.readtext(img_bytes.getvalue(), detail=0, paragraph=True)
-        col_text = " ".join(results).strip()
-        if col_text:
-            full_text.append(col_text)
-
-    return " ".join(full_text)
-
-def process_image_for_ocr(pil_img):
-    # Reduz resolução se muito grande
+def process_image(pil_img):
     if pil_img.width > 1800:
         ratio = 1800 / pil_img.width
-        new_size = (1800, int(pil_img.height * ratio))
-        pil_img = pil_img.resize(new_size, Image.LANCZOS)
-    return ocr_with_columns(pil_img, num_columns=2)  # Ajuste para 3 se necessário
+        pil_img = pil_img.resize((1800, int(pil_img.height * ratio)), Image.LANCZOS)
+    return ocr_with_columns(pil_img, num_columns=2)
 
 def process_pdf(pdf_bytes):
     try:
-        pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        full_text = []
-        for i in range(min(pdf_doc.page_count, 3)):  # Máx 3 páginas
-            page = pdf_doc.load_page(i)
-            pix = page.get_pixmap(dpi=120)  # DPI moderado
-            img_data = pix.tobytes("png")
-            img = Image.open(BytesIO(img_data))
-            with st.spinner(f"Processando página {i+1}..."):
-                text = process_image_for_ocr(img)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        all_text = []
+        for i in range(min(doc.page_count, 2)):  # só 2 páginas para economizar RAM
+            page = doc.load_page(i)
+            pix = page.get_pixmap(dpi=100)
+            img = Image.open(BytesIO(pix.tobytes("png")))
+            with st.spinner(f"Página {i+1}..."):
+                text = process_image(img)
                 if text.strip():
-                    full_text.append(f"[Pág {i+1}]\n{text}")
-        pdf_doc.close()
-        return "\n\n".join(full_text)
+                    all_text.append(f"[Pág {i+1}]\n{text}")
+        doc.close()
+        return "\n\n".join(all_text)
     except Exception as e:
-        st.error("Erro ao processar PDF. Tente um arquivo menor.")
+        st.error("Erro ao processar PDF.")
         return ""
 
-# Interface
-st.set_page_config(page_title="OCR por Colunas", layout="centered")
-st.title("🗞️ OCR para Jornais (Leitura por Colunas)")
-st.caption("Ideal para jornais antigos com 2 colunas. Suporta PDF e imagens.")
+# --- Qwen2-0.5B (rodando localmente) ---
+@st.cache_resource
+def load_qwen_model():
+    with st.spinner("Carregando Qwen2-0.5B... (pode levar 1-2 minutos)"):
+        model_name = "Qwen/Qwen2-0.5B-Instruct"
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16,  # usa menos memória
+            device_map="auto",
+            trust_remote_code=True
+        )
+        return model, tokenizer
+
+def run_qwen(prompt):
+    model, tokenizer = load_qwen_model()
+    messages = [
+        {"role": "system", "content": "Você é um assistente útil."},
+        {"role": "user", "content": prompt}
+    ]
+    text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+    model_inputs = tokenizer([text], return_tensors="pt").to("cpu")
+    
+    with torch.no_grad():
+        generated_ids = model.generate(
+            model_inputs.input_ids,
+            max_new_tokens=512,
+            do_sample=True,
+            temperature=0.6,
+            pad_token_id=tokenizer.eos_token_id
+        )
+    
+    generated_text = generated_ids[0][len(model_inputs.input_ids[0]):]
+    response = tokenizer.decode(generated_text, skip_special_tokens=True)
+    return response
+
+# --- Interface ---
+st.set_page_config(page_title="OCR + Qwen Local", layout="centered")
+st.title("🗞️ OCR + Qwen2-0.5B (100% Hugging Face)")
+st.caption("Modelo rodando localmente — sem API externa, sem erro 403.")
 
 uploaded = st.file_uploader("Envie imagem ou PDF", type=["png", "jpg", "jpeg", "pdf"])
 
 if uploaded:
     if uploaded.type == "application/pdf":
-        with st.spinner("Convertendo PDF..."):
+        with st.spinner("Processando PDF..."):
             text = process_pdf(uploaded.read())
     else:
         img = Image.open(uploaded)
-        with st.spinner("Extraindo texto por colunas..."):
-            text = process_image_for_ocr(img)
+        with st.spinner("Lendo por colunas..."):
+            text = process_image(img)
 
     if text and text.strip():
-        st.text_area("Texto extraído", text[:2000] + "..." if len(text) > 2000 else text, height=200)
+        st.text_area("Texto extraído", text[:1500] + "..." if len(text) > 1500 else text, height=150)
         prompt = st.text_input(
             "Instrução para o Qwen:",
-            "Corrija erros de OCR e reescreva o texto em ordem correta, mantendo o estilo de jornal antigo."
+            "Corrija erros de OCR de jornal antigo. Mantenha grafia da época ('annos'), mas corrija 'Fonscea' → 'Fonseca', etc."
         )
-        if st.button("Enviar para Qwen"):
-            # Limita o texto para evitar estouro de tokens
-            limited_text = text[:1200]
-            resp = query_qwen(f"{prompt}\n\nTexto:\n{limited_text}")
-            if resp:
-                st.subheader("Resposta:")
-                st.write(resp)
+        if st.button("Corrigir com Qwen (local)"):
+            full_prompt = f"{prompt}\n\nTexto:\n{text[:1000]}"
+            with st.spinner("Qwen processando... (pode demorar 20-40s)"):
+                try:
+                    resposta = run_qwen(full_prompt)
+                    st.subheader("Resultado:")
+                    st.write(resposta)
+                except Exception as e:
+                    st.error(f"Erro ao rodar Qwen: {str(e)}")
+                    st.info("Tente reduzir o tamanho do texto ou recarregar a página.")
     else:
-        st.warning("Nenhum texto detectado.")
+        st.warning("Nenhum texto encontrado.")
