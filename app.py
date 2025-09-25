@@ -3,20 +3,19 @@ from PIL import Image
 import easyocr
 import requests
 from io import BytesIO
-from pdf2image import convert_from_bytes
-import os
+import fitz  # PyMuPDF
 
 # Configurações
 MODEL_NAME = "Qwen/Qwen2-0.5B-Instruct"
 HF_TOKEN = st.secrets.get("HF_API_TOKEN", "")
 
 if not HF_TOKEN:
-    st.error("❌ Chave de API do Hugging Face não configurada. Adicione HF_API_TOKEN nos Secrets do Streamlit Cloud.")
+    st.error("❌ Chave de API do Hugging Face não configurada. Adicione HF_API_TOKEN nos Secrets.")
     st.stop()
 
 @st.cache_resource
 def load_ocr():
-    return easyocr.Reader(['en', 'pt'])  # Adicione outros idiomas se quiser
+    return easyocr.Reader(['en', 'pt'])  # Adicione 'es', 'fr' etc. se precisar
 
 def query_qwen(prompt):
     API_URL = f"https://api-inference.huggingface.co/models/{MODEL_NAME}"
@@ -37,34 +36,42 @@ def query_qwen(prompt):
         st.error(f"Erro na API: {response.status_code} – {response.text}")
         return None
 
-def extract_text_from_image(image):
-    """Extrai texto de um objeto PIL.Image"""
+def extract_text_from_image_pil(pil_image):
+    """Extrai texto de uma imagem PIL usando EasyOCR"""
     img_bytes = BytesIO()
-    image.save(img_bytes, format='PNG')
+    pil_image.save(img_bytes, format='PNG')
     reader = load_ocr()
     results = reader.readtext(img_bytes.getvalue())
     return " ".join([res[1] for res in results])
 
-def extract_text_from_pdf(pdf_bytes):
-    """Converte PDF em imagens e aplica OCR em cada página"""
+def extract_text_from_scanned_pdf(pdf_bytes):
+    """Converte PDF escaneado em imagens e aplica OCR em cada página"""
     try:
-        # Converte PDF em lista de imagens (uma por página)
-        images = convert_from_bytes(pdf_bytes, dpi=150)  # dpi=150 é bom equilíbrio
-        all_text = []
-        for i, image in enumerate(images):
-            with st.spinner(f"🔍 Processando página {i+1} do PDF..."):
-                text = extract_text_from_image(image)
+        pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+        full_text = []
+        for page_num in range(pdf_document.page_count):
+            page = pdf_document.load_page(page_num)
+            # Renderiza a página como imagem (matriz de pixels)
+            mat = fitz.Matrix(1.5, 1.5)  # Aumenta resolução para melhor OCR
+            pix = page.get_pixmap(matrix=mat, dpi=150)
+            # Converte para PIL Image
+            img_data = pix.tobytes("png")
+            pil_img = Image.open(BytesIO(img_data))
+            # Aplica OCR
+            with st.spinner(f"🔍 Processando página {page_num + 1}..."):
+                text = extract_text_from_image_pil(pil_img)
                 if text.strip():
-                    all_text.append(f"[Página {i+1}]\n{text}")
-        return "\n\n".join(all_text)
+                    full_text.append(f"[Página {page_num + 1}]\n{text}")
+        pdf_document.close()
+        return "\n\n".join(full_text)
     except Exception as e:
-        st.error(f"Erro ao processar PDF: {str(e)}")
+        st.error(f"Erro ao processar PDF escaneado: {str(e)}")
         return ""
 
 # Interface
-st.set_page_config(page_title="OCR + Qwen (Imagem e PDF)", layout="centered")
-st.title("📄 OCR + Qwen-0.5B")
-st.write("Envie uma **imagem** (PNG/JPG) ou um **PDF**. O app extrai o texto e envia para o Qwen analisar.")
+st.set_page_config(page_title="OCR + Qwen (PDF Escaneado OK!)", layout="centered")
+st.title("📄 OCR para PDF Escaneado + Qwen")
+st.write("Envie **imagens (PNG/JPG)** ou **PDFs escaneados** (com texto em imagem).")
 
 uploaded = st.file_uploader(
     "Escolha um arquivo",
@@ -76,18 +83,18 @@ if uploaded:
     extracted_text = ""
 
     if file_type == "application/pdf":
-        st.info("📄 Arquivo PDF detectado. Convertendo páginas em imagens...")
+        st.info("📄 Detectado PDF. Convertendo páginas em imagens para OCR...")
         pdf_bytes = uploaded.read()
-        extracted_text = extract_text_from_pdf(pdf_bytes)
+        extracted_text = extract_text_from_scanned_pdf(pdf_bytes)
     else:
         # Imagem
         image = Image.open(uploaded)
         st.image(image, caption="Imagem carregada", use_column_width=True)
-        extracted_text = extract_text_from_image(image)
+        extracted_text = extract_text_from_image_pil(image)
 
     if extracted_text.strip():
         st.subheader("Texto extraído:")
-        st.text_area("OCR", extracted_text, height=200)
+        st.text_area("Texto OCR", extracted_text, height=200)
 
         instruction = st.text_input(
             "O que você quer que o Qwen faça com esse texto?",
