@@ -1,5 +1,5 @@
 streamlit
-pdf2image
-pillow
+Pillow
 markdown2
 requests
+PyMuPDF
