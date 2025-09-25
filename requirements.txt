@@ -1,4 +1,2 @@
 streamlit
-easyocr
-Pillow
-PyMuPDF
+pdfplumber
