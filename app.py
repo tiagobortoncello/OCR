@@ -1,144 +1,70 @@
 import streamlit as st
+import easyocr
 from PIL import Image
-import io
-import base64
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import markdown2
 import requests
-import fitz  # PyMuPDF
+from io import BytesIO
 
-# --- CONFIGURAÇÃO HUGGING FACE API ---
-HF_API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-VL-3B-Instruct-AWQ"
-HF_API_KEY = st.secrets.get("HF_API_KEY")  # coloque sua chave no Streamlit Secrets
+# Configurações
+MODEL_NAME = "Qwen/Qwen2-0.5B-Instruct"
+HF_TOKEN = st.secrets["HF_API_TOKEN"]
 
-headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+# Carrega o leitor OCR uma vez (cache)
+@st.cache_resource
+def load_ocr():
+    return easyocr.Reader(['en', 'pt'])  # Adicione mais idiomas se quiser: 'es', 'fr', etc.
 
-# Função para chamar o modelo via API
-def query_hf_api(image_bytes):
-    data = {
-        "inputs": [
-            {
-                "type": "image_bytes",
-                "data": image_bytes.decode("latin1")  # necessário para enviar bytes via JSON
-            },
-            {
-                "type": "text",
-                "text": "Please extract all text from this image."
-            }
-        ]
+def query_qwen(prompt):
+    API_URL = f"https://api-inference.huggingface.co/models/{MODEL_NAME}"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 512,
+            "temperature": 0.6,
+            "return_full_text": False,
+            "do_sample": True
+        }
     }
-    response = requests.post(HF_API_URL, headers=headers, json=data, timeout=60)
+    response = requests.post(API_URL, headers=headers, json=payload)
     if response.status_code == 200:
-        result = response.json()
-        # Ajusta de acordo com o retorno da API
-        if isinstance(result, list) and "generated_text" in result[0]:
-            return result[0]["generated_text"]
-        elif isinstance(result, dict) and "error" in result:
-            return f"API Error: {result['error']}"
-        else:
-            return str(result)
+        return response.json()[0]["generated_text"]
     else:
-        return f"HTTP {response.status_code}: {response.text}"
+        st.error(f"Erro na API: {response.status_code} – {response.text}")
+        return None
 
-# --- Função para converter PDF em imagens usando PyMuPDF ---
-def pdf_to_images(pdf_bytes):
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    images = []
-    for page in doc:
-        pix = page.get_pixmap()
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        images.append(img)
-    return images
+# Interface do app
+st.set_page_config(page_title="OCR + Qwen Gratuito", layout="centered")
+st.title("📄 OCR + Qwen-0.5B (Gratuito!)")
+st.write("Envie uma imagem com texto. O app extrai o texto e envia para o Qwen analisar.")
 
-# --- STREAMLIT UI ---
-st.title("📄 Qwen2.5-VL OCR on PDFs (Hugging Face API)")
+uploaded = st.file_uploader("Escolha uma imagem", type=["png", "jpg", "jpeg"])
 
-uploaded_files = st.file_uploader("Upload PDFs (max 200MB por arquivo)", type=["pdf"], accept_multiple_files=True)
+if uploaded:
+    image = Image.open(uploaded)
+    st.image(image, caption="Imagem carregada", use_column_width=True)
 
-if uploaded_files:
-    st.session_state.processed = False
-    st.session_state.file_results = {}
+    with st.spinner("🔍 Extraindo texto da imagem..."):
+        reader = load_ocr()
+        img_bytes = BytesIO()
+        image.save(img_bytes, format='PNG')
+        result = reader.readtext(img_bytes.getvalue())
+        text = " ".join([line[1] for line in result])
 
-def process_page(file_name, page, page_idx):
-    """Processa uma página via Hugging Face API"""
-    page_start_time = time.time()
-    
-    buf = io.BytesIO()
-    page.save(buf, format="PNG")
-    img_bytes = buf.getvalue()
-    
-    text = query_hf_api(img_bytes)
-    
-    page_time = time.time() - page_start_time
-    img_b64 = base64.b64encode(img_bytes).decode("utf-8")
-    
-    return file_name, page_idx, text, page_time, img_b64, page
+    if text.strip():
+        st.subheader("Texto extraído:")
+        st.text_area("OCR", text, height=120)
 
-# Processamento paralelo
-if uploaded_files and not st.session_state.get("processed", False):
-    st.info("Processando PDFs via Hugging Face API...")
-    progress_bar = st.progress(0)
-    progress_text = st.empty()
+        instruction = st.text_input(
+            "O que você quer que o Qwen faça com esse texto?",
+            "Resuma o texto abaixo em uma frase curta."
+        )
 
-    all_pages = []
-    total_pages = 0
-    st.session_state.file_results = {}
-    
-    for uploaded_file in uploaded_files:
-        file_name = uploaded_file.name
-        pdf_bytes = uploaded_file.read()
-        pages = pdf_to_images(pdf_bytes)
-        all_pages.extend([(file_name, page, i+1) for i, page in enumerate(pages)])
-        total_pages += len(pages)
-        st.session_state.file_results[file_name] = []
-
-    processed_pages = 0
-    MAX_WORKERS = 2  # ajuste conforme necessidade
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(process_page, f, p, i): (f, i) for f, p, i in all_pages}
-        for future in as_completed(futures):
-            file_name, page_idx = futures[future]
-            try:
-                file_name, page_idx, text, page_time, img_b64, page = future.result()
-                processed_pages += 1
-                progress_bar.progress(processed_pages / total_pages)
-                progress_text.text(f"Processado {processed_pages}/{total_pages} páginas")
-                st.session_state.file_results[file_name].append({
-                    "page": page_idx,
-                    "text": text,
-                    "page_time": page_time,
-                    "img_b64": img_b64,
-                    "image": page
-                })
-            except Exception as e:
-                st.error(f"Falha no arquivo {file_name} - página {page_idx}: {str(e)}")
-
-    # Ordena páginas
-    for file_name in st.session_state.file_results:
-        st.session_state.file_results[file_name].sort(key=lambda x: x["page"])
-
-    st.session_state.processed = True
-    progress_text.text("Processamento concluído!")
-
-# Exibir resultados
-if st.session_state.get("file_results"):
-    selected_file = st.selectbox("Selecione um arquivo para visualizar", list(st.session_state.file_results.keys()))
-    if selected_file:
-        col1, col2 = st.columns([2, 3])
-        with col1:
-            for result in st.session_state.file_results[selected_file]:
-                st.subheader(f"Página {result['page']}")
-                st.image(result["image"], use_container_width=True)
-                st.text_area(f"OCR - Página {result['page']}", result["text"], height=150)
-        
-        with col2:
-            markdown_content = f"# OCR Results for {selected_file}\n\n"
-            for result in st.session_state.file_results[selected_file]:
-                markdown_content += f"## Página {result['page']}\n\n"
-                markdown_content += f"**Tempo de processamento**: {result['page_time']:.2f} segundos\n\n"
-                markdown_content += f"```text\n{result['text']}\n```\n\n"
-            html_content = markdown2.markdown(markdown_content, extras=["fenced-code-blocks", "tables"])
-            st.markdown(f'<div class="markdown-preview">{html_content}</div>', unsafe_allow_html=True)
-            st.download_button("Download Markdown", data=markdown_content, file_name=f"ocr_{selected_file}.md", mime="text/markdown")
+        if st.button("Enviar para o Qwen"):
+            full_prompt = f"{instruction}\n\nTexto:\n{text}"
+            with st.spinner("🧠 Processando com Qwen-0.5B..."):
+                resposta = query_qwen(full_prompt)
+                if resposta:
+                    st.subheader("Resposta do Qwen:")
+                    st.write(resposta)
+    else:
+        st.warning("⚠️ Nenhum texto foi encontrado na imagem.")
