@@ -1,17 +1,22 @@
 import streamlit as st
-import easyocr
 from PIL import Image
+import easyocr
 import requests
 from io import BytesIO
+from pdf2image import convert_from_bytes
+import os
 
 # Configurações
 MODEL_NAME = "Qwen/Qwen2-0.5B-Instruct"
-HF_TOKEN = st.secrets["HF_API_TOKEN"]
+HF_TOKEN = st.secrets.get("HF_API_TOKEN", "")
 
-# Carrega o leitor OCR uma vez (cache)
+if not HF_TOKEN:
+    st.error("❌ Chave de API do Hugging Face não configurada. Adicione HF_API_TOKEN nos Secrets do Streamlit Cloud.")
+    st.stop()
+
 @st.cache_resource
 def load_ocr():
-    return easyocr.Reader(['en', 'pt'])  # Adicione mais idiomas se quiser: 'es', 'fr', etc.
+    return easyocr.Reader(['en', 'pt'])  # Adicione outros idiomas se quiser
 
 def query_qwen(prompt):
     API_URL = f"https://api-inference.huggingface.co/models/{MODEL_NAME}"
@@ -32,27 +37,57 @@ def query_qwen(prompt):
         st.error(f"Erro na API: {response.status_code} – {response.text}")
         return None
 
-# Interface do app
-st.set_page_config(page_title="OCR + Qwen Gratuito", layout="centered")
-st.title("📄 OCR + Qwen-0.5B (Gratuito!)")
-st.write("Envie uma imagem com texto. O app extrai o texto e envia para o Qwen analisar.")
+def extract_text_from_image(image):
+    """Extrai texto de um objeto PIL.Image"""
+    img_bytes = BytesIO()
+    image.save(img_bytes, format='PNG')
+    reader = load_ocr()
+    results = reader.readtext(img_bytes.getvalue())
+    return " ".join([res[1] for res in results])
 
-uploaded = st.file_uploader("Escolha uma imagem", type=["png", "jpg", "jpeg"])
+def extract_text_from_pdf(pdf_bytes):
+    """Converte PDF em imagens e aplica OCR em cada página"""
+    try:
+        # Converte PDF em lista de imagens (uma por página)
+        images = convert_from_bytes(pdf_bytes, dpi=150)  # dpi=150 é bom equilíbrio
+        all_text = []
+        for i, image in enumerate(images):
+            with st.spinner(f"🔍 Processando página {i+1} do PDF..."):
+                text = extract_text_from_image(image)
+                if text.strip():
+                    all_text.append(f"[Página {i+1}]\n{text}")
+        return "\n\n".join(all_text)
+    except Exception as e:
+        st.error(f"Erro ao processar PDF: {str(e)}")
+        return ""
+
+# Interface
+st.set_page_config(page_title="OCR + Qwen (Imagem e PDF)", layout="centered")
+st.title("📄 OCR + Qwen-0.5B")
+st.write("Envie uma **imagem** (PNG/JPG) ou um **PDF**. O app extrai o texto e envia para o Qwen analisar.")
+
+uploaded = st.file_uploader(
+    "Escolha um arquivo",
+    type=["png", "jpg", "jpeg", "pdf"]
+)
 
 if uploaded:
-    image = Image.open(uploaded)
-    st.image(image, caption="Imagem carregada", use_column_width=True)
+    file_type = uploaded.type
+    extracted_text = ""
 
-    with st.spinner("🔍 Extraindo texto da imagem..."):
-        reader = load_ocr()
-        img_bytes = BytesIO()
-        image.save(img_bytes, format='PNG')
-        result = reader.readtext(img_bytes.getvalue())
-        text = " ".join([line[1] for line in result])
+    if file_type == "application/pdf":
+        st.info("📄 Arquivo PDF detectado. Convertendo páginas em imagens...")
+        pdf_bytes = uploaded.read()
+        extracted_text = extract_text_from_pdf(pdf_bytes)
+    else:
+        # Imagem
+        image = Image.open(uploaded)
+        st.image(image, caption="Imagem carregada", use_column_width=True)
+        extracted_text = extract_text_from_image(image)
 
-    if text.strip():
+    if extracted_text.strip():
         st.subheader("Texto extraído:")
-        st.text_area("OCR", text, height=120)
+        st.text_area("OCR", extracted_text, height=200)
 
         instruction = st.text_input(
             "O que você quer que o Qwen faça com esse texto?",
@@ -60,11 +95,11 @@ if uploaded:
         )
 
         if st.button("Enviar para o Qwen"):
-            full_prompt = f"{instruction}\n\nTexto:\n{text}"
+            full_prompt = f"{instruction}\n\nTexto:\n{extracted_text}"
             with st.spinner("🧠 Processando com Qwen-0.5B..."):
                 resposta = query_qwen(full_prompt)
                 if resposta:
                     st.subheader("Resposta do Qwen:")
                     st.write(resposta)
     else:
-        st.warning("⚠️ Nenhum texto foi encontrado na imagem.")
+        st.warning("⚠️ Nenhum texto foi encontrado no arquivo.")
