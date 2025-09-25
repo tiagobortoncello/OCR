@@ -1,4 +1,6 @@
 streamlit
-easyocr
-PyMuPDF
-Pillow
+pdf2image
+pillow
+markdown2
+transformers
+torch
