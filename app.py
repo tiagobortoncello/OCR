@@ -12,8 +12,8 @@ import base64
 # Inicializa modelo Hugging Face
 @st.cache_resource
 def load_model():
-    processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct-AWQ")
-    model = AutoModelForVision2Seq.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct-AWQ")
+    processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
+    model = AutoModelForVision2Seq.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
     model.eval()
     if torch.cuda.is_available():
         model.to("cuda")
