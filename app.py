@@ -1,5 +1,4 @@
 import streamlit as st
-from pdf2image import convert_from_bytes
 from PIL import Image
 import io
 import base64
@@ -7,6 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import markdown2
 import requests
+import fitz  # PyMuPDF
 
 # --- CONFIGURAÇÃO HUGGING FACE API ---
 HF_API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-VL-3B-Instruct-AWQ"
@@ -30,9 +30,8 @@ def query_hf_api(image_bytes):
     }
     response = requests.post(HF_API_URL, headers=headers, json=data, timeout=60)
     if response.status_code == 200:
-        # A API retorna texto como string
         result = response.json()
-        # Depende do formato da resposta, ajustamos se necessário
+        # Ajusta de acordo com o retorno da API
         if isinstance(result, list) and "generated_text" in result[0]:
             return result[0]["generated_text"]
         elif isinstance(result, dict) and "error" in result:
@@ -42,10 +41,20 @@ def query_hf_api(image_bytes):
     else:
         return f"HTTP {response.status_code}: {response.text}"
 
+# --- Função para converter PDF em imagens usando PyMuPDF ---
+def pdf_to_images(pdf_bytes):
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    images = []
+    for page in doc:
+        pix = page.get_pixmap()
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        images.append(img)
+    return images
+
 # --- STREAMLIT UI ---
 st.title("📄 Qwen2.5-VL OCR on PDFs (Hugging Face API)")
 
-uploaded_files = st.file_uploader("Upload PDFs (max 200MB per arquivo)", type=["pdf"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload PDFs (max 200MB por arquivo)", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
     st.session_state.processed = False
@@ -78,7 +87,8 @@ if uploaded_files and not st.session_state.get("processed", False):
     
     for uploaded_file in uploaded_files:
         file_name = uploaded_file.name
-        pages = convert_from_bytes(uploaded_file.read(), dpi=150)
+        pdf_bytes = uploaded_file.read()
+        pages = pdf_to_images(pdf_bytes)
         all_pages.extend([(file_name, page, i+1) for i, page in enumerate(pages)])
         total_pages += len(pages)
         st.session_state.file_results[file_name] = []
