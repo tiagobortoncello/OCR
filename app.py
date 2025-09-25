@@ -2,74 +2,73 @@ import streamlit as st
 from pdf2image import convert_from_bytes
 from PIL import Image
 import io
+import base64
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import markdown2
-from transformers import AutoProcessor, AutoModelForVision2Seq
-import torch
-import base64
+import requests
 
-# Inicializa modelo Hugging Face
-@st.cache_resource
-def load_model():
-    processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
-    model = AutoModelForVision2Seq.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
-    model.eval()
-    if torch.cuda.is_available():
-        model.to("cuda")
-    return processor, model
+# --- CONFIGURAÇÃO HUGGING FACE API ---
+HF_API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-VL-3B-Instruct-AWQ"
+HF_API_KEY = st.secrets.get("HF_API_KEY")  # coloque sua chave no Streamlit Secrets
 
-processor, model = load_model()
+headers = {"Authorization": f"Bearer {HF_API_KEY}"}
 
-# Custom CSS
-st.markdown("""
-<style>
-.main { background-color: #f8f9fa; padding: 30px; }
-.stButton>button { background-color: #28a745; color: white; border-radius: 8px; padding: 8px 16px; font-size: 16px; margin-top: 10px; }
-.stTextArea>label { font-weight: bold; color: #1a3c34; font-size: 16px; }
-.stImage>img { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 15px; }
-.sidebar .sidebar-content { background-color: #ffffff; padding: 20px; border-right: 1px solid #e0e0e0; }
-h1, h2, h3 { color: #1a3c34; font-family: 'Helvetica Neue', Arial, sans-serif; margin-bottom: 20px; }
-.markdown-preview { background-color: #ffffff; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; min-height: 400px; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 16px; }
-</style>
-""", unsafe_allow_html=True)
+# Função para chamar o modelo via API
+def query_hf_api(image_bytes):
+    data = {
+        "inputs": [
+            {
+                "type": "image_bytes",
+                "data": image_bytes.decode("latin1")  # necessário para enviar bytes via JSON
+            },
+            {
+                "type": "text",
+                "text": "Please extract all text from this image."
+            }
+        ]
+    }
+    response = requests.post(HF_API_URL, headers=headers, json=data, timeout=60)
+    if response.status_code == 200:
+        # A API retorna texto como string
+        result = response.json()
+        # Depende do formato da resposta, ajustamos se necessário
+        if isinstance(result, list) and "generated_text" in result[0]:
+            return result[0]["generated_text"]
+        elif isinstance(result, dict) and "error" in result:
+            return f"API Error: {result['error']}"
+        else:
+            return str(result)
+    else:
+        return f"HTTP {response.status_code}: {response.text}"
 
-st.title("📄 Qwen2.5-VL OCR on PDFs (Hugging Face)")
+# --- STREAMLIT UI ---
+st.title("📄 Qwen2.5-VL OCR on PDFs (Hugging Face API)")
 
-# Upload de PDFs
-uploaded_files = st.file_uploader("Upload PDFs (max 200MB por arquivo)", type=["pdf"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload PDFs (max 200MB per arquivo)", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
     st.session_state.processed = False
     st.session_state.file_results = {}
 
 def process_page(file_name, page, page_idx):
-    """Processa uma página usando Qwen2.5-VL via Hugging Face"""
+    """Processa uma página via Hugging Face API"""
     page_start_time = time.time()
     
-    # Converte a página em imagem
     buf = io.BytesIO()
     page.save(buf, format="PNG")
     img_bytes = buf.getvalue()
-    img_b64 = base64.b64encode(img_bytes).decode("utf-8")
     
-    image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    
-    # Prepara entrada para o modelo
-    inputs = processor(images=image, return_tensors="pt")
-    if torch.cuda.is_available():
-        inputs = {k:v.to("cuda") for k,v in inputs.items()}
-    
-    # Gera resposta
-    with torch.no_grad():
-        outputs = model.generate(**inputs)
-        text = processor.decode(outputs[0], skip_special_tokens=True)
+    text = query_hf_api(img_bytes)
     
     page_time = time.time() - page_start_time
+    img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+    
     return file_name, page_idx, text, page_time, img_b64, page
 
+# Processamento paralelo
 if uploaded_files and not st.session_state.get("processed", False):
-    st.info("Processando PDFs em paralelo...")
+    st.info("Processando PDFs via Hugging Face API...")
     progress_bar = st.progress(0)
     progress_text = st.empty()
 
@@ -85,7 +84,7 @@ if uploaded_files and not st.session_state.get("processed", False):
         st.session_state.file_results[file_name] = []
 
     processed_pages = 0
-    MAX_WORKERS = 2  # você pode ajustar conforme GPU/CPU
+    MAX_WORKERS = 2  # ajuste conforme necessidade
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(process_page, f, p, i): (f, i) for f, p, i in all_pages}
