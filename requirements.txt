@@ -2,7 +2,3 @@ streamlit
 easyocr
 Pillow
 PyMuPDF
-torch
-transformers>=4.37.0
-accelerate
-sentencepiece
