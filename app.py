@@ -34,7 +34,8 @@ def correct_ocr_text(raw_text):
     - **Remova o cabeçalho do jornal ou documento, incluindo TÍTULO (Ex: "MINAS GERAES"), subtítulo, informações de ASSINATURA, VENDA AVULSA, data, número da edição, e quaisquer linhas divisórias.** O objetivo é extrair APENAS o corpo legal/noticioso do texto.
     - Corrija falhas de detecção do OCR (ex: 'Asy!o' para 'Asilo', '¢m' para 'em').
     - Normalize ortografias arcaicas como 'Geraes' para 'Gerais', 'Conceigao' para 'Conceição', 'Immaculada' para 'Imaculada', 'legaes' para 'legais', 'Asylo' para 'Asilo'.
-    - **Após a correção e remoção, mantenha a separação de parágrafos, inserindo uma linha em branco entre eles.** Remova apenas quebras de linha desnecessárias dentro de um mesmo parágrafo e espaços múltiplos.
+    - **Não crie ou deduza palavras que não estejam completas no texto.** Se a palavra foi identificada como "insti-" no final de uma página, não a complete. Mantenha exatamente o que foi extraído.
+    - Após a correção e remoção, mantenha a separação de parágrafos, inserindo uma linha em branco entre eles. Remova apenas quebras de linha desnecessárias dentro de um mesmo parágrafo e espaços múltiplos.
     - **Retorne APENAS o texto corrigido e com os parágrafos separados**, sem qualquer introdução, explicação ou formatação adicional (como markdown).
     """
 
@@ -56,7 +57,7 @@ def correct_ocr_text(raw_text):
     except requests.exceptions.HTTPError as http_err:
         st.error(f"Erro HTTP ({http_err.response.status_code}) na correção via Gemini. Exibindo texto bruto.")
     except Exception as e:
-        st.error(f"Erro inesperado durante a correção via Gemini: {e}. Exibindo texto bruto.")
+        st.error(f"Ocorreu um erro inesperado durante a correção via Gemini: {e}. Exibindo texto bruto.")
 
     return raw_text
 
@@ -76,7 +77,7 @@ if not OCRMypdf_PATH:
     st.stop()
 
 st.title("Processador de PDF com OCR e Correção de IA")
-st.markdown("Faça o upload de um PDF digitalizado. A IA irá processar o texto, **remover o cabeçalho** e formatar o corpo **mantendo a separação entre os parágrafos**.")
+st.markdown("Faça o upload de um PDF digitalizado. A IA irá processar o texto, **remover o cabeçalho**, **manter a separação entre os parágrafos** e **não completar palavras incompletas**.")
 
 uploaded_file = st.file_uploader("Escolha um arquivo PDF...", type=["pdf"])
 
