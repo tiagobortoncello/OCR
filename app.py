@@ -6,7 +6,7 @@ import shutil
 import requests
 import json
 
-st.set_page_config(page_title="Processador de PDF com OCR", layout="centered")
+st.set_page_config(page_title="Conversor de PDF para texto (OCR)", layout="centered")
 
 # --- FUNÇÕES PARA A CORREÇÃO DE TEXTO COM GEMINI ---
 
@@ -76,8 +76,8 @@ if not OCRMypdf_PATH:
     """)
     st.stop()
 
-st.title("Processador de PDF com OCR e Correção de IA")
-st.markdown("Faça o upload de um PDF digitalizado. A IA irá processar o texto, **remover o cabeçalho**, **manter a separação entre os parágrafos** e **não completar palavras incompletas**.")
+st.title("Conversor de PDF para texto (OCR)")
+# st.markdown("Faça o upload de um PDF digitalizado. A IA irá processar o texto, **remover o cabeçalho**, **manter a separação entre os parágrafos** e **não completar palavras incompletas**.") # REMOVIDO CONFORME SOLICITADO
 
 uploaded_file = st.file_uploader("Escolha um arquivo PDF...", type=["pdf"])
 
