@@ -6,27 +6,9 @@ import shutil
 import requests
 import json
 
-st.set_page_config(page_title="Conversor de PDF para texto (OCR)", layout="centered")
+st.set_page_config(page_title="Processador de PDF com OCR", layout="centered")
 
-# --- FUNÇÕES PARA O DICIONÁRIO E CORREÇÃO DE TEXTO COM GEMINI ---
-
-def load_dictionary(filename="dicionario_arcaismo.txt"):
-    """
-    Lê o conteúdo do arquivo do dicionário, que deve estar no formato:
-    arcaísmo -> termo_atual
-    """
-    dictionary_content = ""
-    try:
-        # Tenta abrir e ler o arquivo do dicionário
-        # O encoding 'utf-8' é crucial para caracteres especiais (como 'ç', 'ã', etc.)
-        with open(filename, "r", encoding="utf-8") as f:
-            dictionary_content = f.read()
-    except FileNotFoundError:
-        # Exibe um aviso no Streamlit se o arquivo não for encontrado
-        st.warning(f"Aviso: O arquivo de dicionário '{filename}' não foi encontrado. A normalização de arcaísmos será baseada apenas no conhecimento do modelo.")
-        
-    return dictionary_content
-
+# --- FUNÇÕES PARA A CORREÇÃO DE TEXTO COM GEMINI ---
 
 def get_api_key():
     """
@@ -38,29 +20,21 @@ def get_api_key():
 def correct_ocr_text(raw_text):
     """
     Chama a API da Gemini para corrigir erros de OCR, normalizar a ortografia arcaica
-    e IGNORAR O CABEÇALHO, usando o dicionário injetado no prompt.
+    e IGNORAR O CABEÇALHO.
     """
     api_key = get_api_key()
     
     apiUrl = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={api_key if api_key else ''}"
     
-    # CARREGA O DICIONÁRIO DE REGRAS
-    dictionary_rules = load_dictionary()
-    
-    # INJETA O DICIONÁRIO NO PROMPT
-    system_prompt = f"""
+    system_prompt = """
     Você é um corretor ortográfico e normalizador de texto brasileiro. 
     Sua tarefa é receber um texto bruto de um processo de OCR, que pode conter erros de detecção e ortografia arcaica (comum em documentos legais e antigos).
 
     Regras de correção, normalização e **REMOÇÃO**:
-    - **Remova o cabeçalho do jornal ou documento, incluindo TÍTULO** (Ex: "MINAS GERAES"), subtítulo, informações de ASSINATURA, VENDA AVULSA, data, número da edição, e quaisquer linhas divisórias. O objetivo é extrair APENAS o corpo legal/noticioso do texto.
+    - **Remova o cabeçalho do jornal ou documento, incluindo TÍTULO (Ex: "MINAS GERAES"), subtítulo, informações de ASSINATURA, VENDA AVULSA, data, número da edição, e quaisquer linhas divisórias.** O objetivo é extrair APENAS o corpo legal/noticioso do texto.
     - Corrija falhas de detecção do OCR (ex: 'Asy!o' para 'Asilo', '¢m' para 'em').
-
-    **- Regras de normalização de ortografia arcaica:**
-    **Utilize as seguintes substituições como regras rígidas:**
-    {dictionary_rules}
-    
-    - Não crie ou deduza palavras que não estejam completas no texto. Se a palavra foi identificada como "insti-" no final de uma página, não a complete. Mantenha exatamente o que foi extraído.
+    - Normalize ortografias arcaicas como 'Geraes' para 'Gerais', 'Conceigao' para 'Conceição', 'Immaculada' para 'Imaculada', 'legaes' para 'legais', 'Asylo' para 'Asilo'.
+    - **Não crie ou deduza palavras que não estejam completas no texto.** Se a palavra foi identificada como "insti-" no final de uma página, não a complete. Mantenha exatamente o que foi extraído.
     - Após a correção e remoção, mantenha a separação de parágrafos, inserindo uma linha em branco entre eles. Remova apenas quebras de linha desnecessárias dentro de um mesmo parágrafo e espaços múltiplos.
     - **Retorne APENAS o texto corrigido e com os parágrafos separados**, sem qualquer introdução, explicação ou formatação adicional (como markdown).
     """
@@ -102,7 +76,8 @@ if not OCRMypdf_PATH:
     """)
     st.stop()
 
-st.title("Conversor de PDF para texto (OCR)")
+st.title("Processador de PDF com OCR e Correção de IA")
+st.markdown("Faça o upload de um PDF digitalizado. A IA irá processar o texto, **remover o cabeçalho**, **manter a separação entre os parágrafos** e **não completar palavras incompletas**.")
 
 uploaded_file = st.file_uploader("Escolha um arquivo PDF...", type=["pdf"])
 
