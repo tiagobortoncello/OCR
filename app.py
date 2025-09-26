@@ -78,7 +78,7 @@ if not OCRMypdf_PATH:
     st.stop()
 
 # NOVO TÍTULO AQUI
-st.title("Conversor de PDF para texto (OCR) e Correção de IA")
+st.title("Conversor de PDF para texto (OCR)")
 # A LINHA st.markdown("Faça o upload de um PDF digitalizado. A IA irá processar o texto, **remover o cabeçalho**, **manter a separação entre os parágrafos** e **não completar palavras incompletas**.") FOI REMOVIDA.
 
 # NOVO AVISO AQUI
