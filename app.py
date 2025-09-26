@@ -15,13 +15,14 @@ def get_api_key():
     """
     Tenta obter a chave de API das variáveis de ambiente ou secrets do Streamlit.
     """
+    # Preferência para a chave 'GEMINI_API_KEY' nos secrets do Streamlit
     api_key = os.environ.get("GOOGLE_API_KEY") or st.secrets.get("GEMINI_API_KEY")
     return api_key
 
 def correct_ocr_text(raw_text):
     """
     Chama a API da Gemini para corrigir erros de OCR, normalizar a ortografia arcaica,
-    IGNORAR O CABEÇALHO e **REFORMATAR EM MARKDOWN, INCLUINDO TABELAS**.
+    IGNORAR O CABEÇALHO e **REFORMATAR EM MARKDOWN, INCLUINDO TABELAS**, sendo fiel aos dados.
     """
     api_key = get_api_key()
     
@@ -32,6 +33,7 @@ def correct_ocr_text(raw_text):
     # Modelo gemini-2.5-flash
     apiUrl = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     
+    # PROMPT ATUALIZADO PARA PROIBIR INFERÊNCIA DE DADOS
     system_prompt = """
     Você é um corretor ortográfico e normalizador de texto brasileiro, especializado em documentos históricos.
     Sua tarefa é receber um texto bruto de um processo de OCR, corrigir erros e normalizar a ortografia arcaica (comum em documentos legais e antigos).
@@ -39,15 +41,16 @@ def correct_ocr_text(raw_text):
     **Você deve retornar o resultado INTEIRO no formato Markdown.**
 
     Regras de correção, normalização e formatação:
+    - **Proibição de Inferência de Dados:** É proibido **INVENTAR, DEDUZIR, RESUMIR ou ADICIONAR** quaisquer palavras, números, títulos ou linhas de rodapé (como "Total", "Subtotal", "Geral") que não estejam explicitamente no texto bruto do OCR. **Mantenha-se 100% fiel aos dados.**
     - **Remoção de Cabeçalho:** Remova o cabeçalho do jornal ou documento, incluindo TÍTULO (Ex: "MINAS GERAES"), subtítulo, informações de ASSINATURA, VENDA AVULSA, data, número da edição e quaisquer linhas divisórias. O objetivo é extrair APENAS o corpo legal/noticioso do texto.
     - **Correção e Normalização:** Corrija falhas de detecção do OCR (ex: 'Asy!o' para 'Asilo') e normalize ortografias arcaicas ('Geraes' para 'Gerais', 'legaes' para 'legais').
-    - **Tabelas:** Se o texto extraído contiver dados que formavam uma tabela no PDF, **RE-CRIE ESSA TABELA usando a sintaxe Markdown de tabelas** (cabeçalhos, separadores e linhas).
+    - **Tabelas:** Se o texto extraído contiver dados que formavam uma tabela no PDF, **RE-CRIE ESSA TABELA usando a sintaxe Markdown de tabelas** (cabeçalhos, separadores e linhas). Use cabeçalhos de coluna APENAS se estiverem visíveis no texto bruto.
     - **Parágrafos:** Após a correção e remoção, mantenha a separação de parágrafos, inserindo uma linha em branco entre eles. Remova apenas quebras de linha desnecessárias dentro de um mesmo parágrafo e espaços múltiplos.
     - **Não crie ou deduza palavras que não estejam completas no texto.**
     - **Retorne APENAS o texto corrigido e formatado em Markdown**, sem qualquer introdução, explicação ou formatação adicional (como ```markdown```).
     """
 
-    # Payload Corrigido: system_instruction movida para o nível superior (resolvendo o erro 400)
+    # Payload Corrigido (usando system_instruction)
     payload = {
         "contents": [{"parts": [{"text": raw_text}]}],
         "system_instruction": {"parts": [{"text": system_prompt}]}, 
@@ -105,7 +108,7 @@ if uploaded_file is not None:
         input_filepath = input_file.name
 
     output_ocr_filepath = os.path.join(tempfile.gettempdir(), "output_ocr.pdf")
-    markdown_filepath = os.path.join(tempfile.gettempdir(), "texto_temporario.md") # Usado para armazenar raw/corrigido
+    markdown_filepath = os.path.join(tempfile.gettempdir(), "texto_temporario.md") 
     odt_filepath = os.path.join(tempfile.gettempdir(), "documento_final.odt") 
 
     try:
@@ -141,7 +144,7 @@ if uploaded_file is not None:
             with st.spinner("Convertendo Markdown formatado (com tabelas) para arquivo ODT do LibreOffice..."):
                 command_pandoc = [
                     PANDOC_PATH,
-                    "--standalone", # Cria um documento completo (com cabeçalhos e footers)
+                    "--standalone", 
                     "-s",
                     markdown_filepath,
                     "-o",
