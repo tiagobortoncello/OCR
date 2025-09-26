@@ -15,6 +15,7 @@ def get_api_key():
     """
     Tenta obter a chave de API das variáveis de ambiente ou secrets do Streamlit.
     """
+    # Preferência para a chave 'GEMINI_API_KEY' nos secrets do Streamlit
     api_key = os.environ.get("GOOGLE_API_KEY") or st.secrets.get("GEMINI_API_KEY")
     return api_key
 
@@ -47,11 +48,10 @@ def correct_ocr_text(raw_text):
     - **Retorne APENAS o texto corrigido e formatado em Markdown**, sem qualquer introdução, explicação ou formatação adicional (como ```markdown```).
     """
 
+    # CORREÇÃO DO ERRO 400: systemInstruction movida para 'system_instruction' no nível superior do payload.
     payload = {
         "contents": [{"parts": [{"text": raw_text}]}],
-        "config": {
-            "systemInstruction": system_prompt
-        }
+        "system_instruction": {"parts": [{"text": system_prompt}]}, 
     }
     
     try:
@@ -59,13 +59,10 @@ def correct_ocr_text(raw_text):
                                  headers={'Content-Type': 'application/json'}, 
                                  data=json.dumps(payload))
         
-        # --- DEBUG PARA ERRO 400 ---
+        # Manter o debug 400 para segurança, mas o erro deve ter sido resolvido
         if response.status_code == 400:
-            # Exibe a mensagem de erro detalhada da API da Google
             st.error(f"Erro detalhado da API (400): {response.text}")
-            # Retorna o texto bruto para inspeção
             return raw_text
-        # ---------------------------
 
         response.raise_for_status() 
         result = response.json()
@@ -138,10 +135,12 @@ if uploaded_file is not None:
 
             # Exibição formatada em Streamlit
             st.info("O texto abaixo está formatado em **Markdown**. Tabelas e parágrafos foram reestruturados.")
+            # st.markdown renderiza o Markdown corretamente
             st.markdown(sidecar_text_corrected, unsafe_allow_html=False)
             
             st.markdown("---")
             st.subheader("Código Fonte (Markdown)")
+            # st.code exibe a sintaxe Markdown para que o usuário possa copiar o formato
             st.code(sidecar_text_corrected, language="markdown")
             
             # Botão de Download
