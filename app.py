@@ -6,7 +6,8 @@ import shutil
 import requests
 import json
 
-st.set_page_config(page_title="Processador de PDF com OCR", layout="centered")
+# NOVO NOME AQUI
+st.set_page_config(page_title="Conversor de PDF para texto (OCR)", layout="centered")
 
 # --- FUNÇÕES PARA A CORREÇÃO DE TEXTO COM GEMINI ---
 
@@ -76,8 +77,12 @@ if not OCRMypdf_PATH:
     """)
     st.stop()
 
-st.title("Processador de PDF com OCR e Correção de IA")
+# NOVO TÍTULO AQUI
+st.title("Conversor de PDF para texto (OCR) e Correção de IA")
 st.markdown("Faça o upload de um PDF digitalizado. A IA irá processar o texto, **remover o cabeçalho**, **manter a separação entre os parágrafos** e **não completar palavras incompletas**.")
+
+# NOVO AVISO AQUI
+st.warning("⚠️ **AVISO IMPORTANTE:** Este aplicativo e suas regras de correção com IA (principalmente remoção de cabeçalho e normalização de ortografia arcaica) foram desenvolvidos para uso exclusivo com **PDFs de JORNAIS ANTIGOS (e.g., documentos históricos, edições centenárias)**, onde cabeçalhos são padronizados e a ortografia é inconsistente. **NÃO use com PDFs de jornais ATUAIS,** documentos modernos, ou qualquer outro formato, pois os resultados podem ser inesperados e a remoção de cabeçalho pode falhar ou remover conteúdo essencial.")
 
 uploaded_file = st.file_uploader("Escolha um arquivo PDF...", type=["pdf"])
 
