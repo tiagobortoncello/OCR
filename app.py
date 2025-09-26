@@ -29,8 +29,7 @@ def correct_ocr_text(raw_text):
         st.error("Chave de API do Gemini não encontrada. Verifique as variáveis de ambiente ou secrets.")
         return raw_text
     
-    # Usando um modelo mais robusto para formatação de tabelas
-    # Alterei o modelo de volta para gemini-2.5-flash-preview-05-20, mas o gemini-2.5-flash também funcionaria.
+    # Modelo gemini-2.5-flash
     apiUrl = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     
     system_prompt = """
@@ -59,7 +58,16 @@ def correct_ocr_text(raw_text):
         response = requests.post(apiUrl, 
                                  headers={'Content-Type': 'application/json'}, 
                                  data=json.dumps(payload))
-        response.raise_for_status()
+        
+        # --- DEBUG PARA ERRO 400 ---
+        if response.status_code == 400:
+            # Exibe a mensagem de erro detalhada da API da Google
+            st.error(f"Erro detalhado da API (400): {response.text}")
+            # Retorna o texto bruto para inspeção
+            return raw_text
+        # ---------------------------
+
+        response.raise_for_status() 
         result = response.json()
         
         corrected_text = result.get("candidates", [])[0].get("content", {}).get("parts", [])[0].get("text", "")
@@ -89,7 +97,6 @@ if not OCRMypdf_PATH:
 
 # NOVO TÍTULO AQUI
 st.title("Conversor de PDF para texto (OCR)")
-# A LINHA st.markdown("Faça o upload de um PDF digitalizado. A IA irá processar o texto, **remover o cabeçalho**, **manter a separação entre os parágrafos** e **não completar palavras incompletas**.") FOI REMOVIDA.
 
 # NOVO AVISO AQUI
 st.warning("⚠️ **AVISO IMPORTANTE:** Este aplicativo só deve ser utilizado para edições antigas do Jornal Minas Gerais. Versões atuais são pesadas e podem fazer o aplicativo parar de funcionar.")
