@@ -6,8 +6,8 @@ import shutil
 import requests
 import json
 
-# NOVO NOME AQUI
-st.set_page_config(page_title="Conversor de PDF para texto (OCR)", layout="centered")
+# Define as configurações básicas da página
+st.set_page_config(page_title="Conversor de PDF para texto (OCR) e ODT", layout="centered")
 
 # --- FUNÇÕES PARA A CORREÇÃO DE TEXTO COM GEMINI ---
 
@@ -15,7 +15,6 @@ def get_api_key():
     """
     Tenta obter a chave de API das variáveis de ambiente ou secrets do Streamlit.
     """
-    # Preferência para a chave 'GEMINI_API_KEY' nos secrets do Streamlit
     api_key = os.environ.get("GOOGLE_API_KEY") or st.secrets.get("GEMINI_API_KEY")
     return api_key
 
@@ -48,7 +47,7 @@ def correct_ocr_text(raw_text):
     - **Retorne APENAS o texto corrigido e formatado em Markdown**, sem qualquer introdução, explicação ou formatação adicional (como ```markdown```).
     """
 
-    # CORREÇÃO DO ERRO 400: systemInstruction movida para 'system_instruction' no nível superior do payload.
+    # Payload Corrigido: system_instruction movida para o nível superior (resolvendo o erro 400)
     payload = {
         "contents": [{"parts": [{"text": raw_text}]}],
         "system_instruction": {"parts": [{"text": system_prompt}]}, 
@@ -59,9 +58,8 @@ def correct_ocr_text(raw_text):
                                  headers={'Content-Type': 'application/json'}, 
                                  data=json.dumps(payload))
         
-        # Manter o debug 400 para segurança, mas o erro deve ter sido resolvido
         if response.status_code == 400:
-            st.error(f"Erro detalhado da API (400): {response.text}")
+            st.error(f"Erro detalhado da API (400): {response.text}. Verifique o tamanho do PDF.")
             return raw_text
 
         response.raise_for_status() 
@@ -80,72 +78,100 @@ def correct_ocr_text(raw_text):
 # --- CORPO PRINCIPAL DO APP ---
 
 OCRMypdf_PATH = shutil.which("ocrmypdf")
+PANDOC_PATH = shutil.which("pandoc") 
 
-if not OCRMypdf_PATH:
+if not OCRMypdf_PATH or not PANDOC_PATH:
     st.error("""
-        O executável **'ocrmypdf' não foi encontrado** no ambiente do Streamlit Cloud.
-        Isso pode ser uma falha na instalação das dependências de sistema (`packages.txt`).
-        
-        **Ações recomendadas:**
-        1. Confirme se o arquivo `packages.txt` contém apenas `ocrmypdf` e está na **raiz** do seu repositório.
-        2. Force um **restart ou re-deploy** do seu aplicativo no Streamlit Cloud.
+        O executável **'ocrmypdf' ou 'pandoc' não foi encontrado**.
+        Verifique se o arquivo `packages.txt` (na raiz do repositório) contém as linhas `ocrmypdf` e `pandoc`.
+        Pode ser necessário forçar um re-deploy ou restart do aplicativo.
     """)
     st.stop()
 
-# NOVO TÍTULO AQUI
-st.title("Conversor de PDF para texto (OCR)")
+# Título do App
+st.title("Conversor de PDF para texto (OCR) e ODT")
 
-# NOVO AVISO AQUI
-st.warning("⚠️ **AVISO IMPORTANTE:** Este aplicativo só deve ser utilizado para edições antigas do Jornal Minas Gerais. Versões atuais são pesadas e podem fazer o aplicativo parar de funcionar.")
+# Aviso
+st.warning("⚠️ **AVISO IMPORTANTE:** Este aplicativo só deve ser utilizado para edições antigas do Jornal Minas Gerais. Versões atuais são pesadas e podem fazer o aplicativo parar de funcionar devido aos limites de recursos.")
 
 uploaded_file = st.file_uploader("Escolha um arquivo PDF...", type=["pdf"])
 
 if uploaded_file is not None:
     st.info("Arquivo carregado com sucesso. Processando...")
     
+    # Define caminhos temporários
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as input_file:
         input_file.write(uploaded_file.read())
         input_filepath = input_file.name
 
-    output_filepath = os.path.join(tempfile.gettempdir(), "output_ocr.pdf")
+    output_ocr_filepath = os.path.join(tempfile.gettempdir(), "output_ocr.pdf")
+    markdown_filepath = os.path.join(tempfile.gettempdir(), "texto_temporario.md") # Usado para armazenar raw/corrigido
+    odt_filepath = os.path.join(tempfile.gettempdir(), "documento_final.odt") 
 
     try:
-        command = [
+        # 1. Execução do OCRMypdf (Extração de texto bruto)
+        command_ocr = [
             OCRMypdf_PATH,
             "--force-ocr",
             "--sidecar",
-            "/tmp/output.txt",
+            markdown_filepath, 
             input_filepath,
-            output_filepath
+            output_ocr_filepath
         ]
         
-        process = subprocess.run(command, check=True, capture_output=True, text=True)
+        subprocess.run(command_ocr, check=True, capture_output=True, text=True)
         
         st.success("Processo de OCR concluído!")
 
-        if os.path.exists("/tmp/output.txt"):
-            with open("/tmp/output.txt", "r") as f:
+        if os.path.exists(markdown_filepath):
+            with open(markdown_filepath, "r") as f:
                 sidecar_text_raw = f.read()
             
             st.markdown("---")
             st.subheader("🤖 Texto Extraído e Corrigido (IA)")
             
-            with st.spinner("Removendo cabeçalho, corrigindo ortografia arcaica, erros de OCR e formatando o texto em Markdown (incluindo tabelas)..."):
+            with st.spinner("Removendo cabeçalho, corrigindo ortografia arcaica e formatando o texto em Markdown..."):
                 sidecar_text_corrected = correct_ocr_text(sidecar_text_raw)
+            
+            # Sobrescreve o arquivo .md com o texto corrigido pelo Gemini
+            with open(markdown_filepath, "w", encoding='utf-8') as f:
+                f.write(sidecar_text_corrected)
 
-            # Exibição formatada em Streamlit
+            # 2. Execução do Pandoc (Conversão de MD para ODT)
+            with st.spinner("Convertendo Markdown formatado (com tabelas) para arquivo ODT do LibreOffice..."):
+                command_pandoc = [
+                    PANDOC_PATH,
+                    "--standalone", # Cria um documento completo (com cabeçalhos e footers)
+                    "-s",
+                    markdown_filepath,
+                    "-o",
+                    odt_filepath
+                ]
+                subprocess.run(command_pandoc, check=True, capture_output=True, text=True)
+                st.success("Conversão para ODT concluída! Seu documento está pronto para download.")
+
+            # 3. Exibição e Download dos Arquivos
             st.info("O texto abaixo está formatado em **Markdown**. Tabelas e parágrafos foram reestruturados.")
-            # st.markdown renderiza o Markdown corretamente
             st.markdown(sidecar_text_corrected, unsafe_allow_html=False)
             
             st.markdown("---")
-            st.subheader("Código Fonte (Markdown)")
-            # st.code exibe a sintaxe Markdown para que o usuário possa copiar o formato
+            
+            # Download do ODT formatado (tabelas inclusas, ideal para LibreOffice)
+            with open(odt_filepath, "rb") as f:
+                st.download_button(
+                    label="⬇️ Baixar Documento Formatado (.odt)",
+                    data=f.read(),
+                    file_name="documento_final.odt",
+                    mime="application/vnd.oasis.opendocument.text"
+                )
+            
+            st.markdown("---")
+            st.subheader("Código Fonte (Markdown para inspeção)")
             st.code(sidecar_text_corrected, language="markdown")
             
-            # Botão de Download
+            # Download do MD (como backup)
             st.download_button(
-                label="⬇️ Baixar Texto Corrigido (Formato Markdown .md)",
+                label="Baixar Texto Corrigido (Formato Markdown .md)",
                 data=sidecar_text_corrected.encode('utf-8'),
                 file_name="texto_corrigido_formatado.md",
                 mime="text/markdown"
@@ -153,7 +179,8 @@ if uploaded_file is not None:
             
             st.markdown("---")
             
-            with open(output_filepath, "rb") as f:
+            # Download do PDF pesquisável
+            with open(output_ocr_filepath, "rb") as f:
                 st.download_button(
                     label="📥 Baixar PDF Processado (Pesquisável)",
                     data=f.read(),
@@ -162,14 +189,16 @@ if uploaded_file is not None:
                 )
 
     except subprocess.CalledProcessError as e:
-        st.error(f"Erro ao processar o PDF. Detalhes: {e.stderr}")
-        st.code(f"Comando tentado: {' '.join(command)}")
+        # Captura erros tanto do OCRMypdf quanto do Pandoc
+        st.error(f"Erro ao processar o arquivo (OCR ou Pandoc). Detalhes: {e.stderr}")
+        st.code(f"Comando tentado: {' '.join(e.cmd)}")
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado: {e}")
     finally:
-        if os.path.exists(input_filepath):
-            os.unlink(input_filepath)
-        if os.path.exists(output_filepath):
-            os.unlink(output_filepath)
-        if os.path.exists("/tmp/output.txt"):
-            os.unlink("/tmp/output.txt")
+        # Limpeza de todos os arquivos temporários, fundamental no Streamlit Cloud
+        for filepath in [input_filepath, output_ocr_filepath, markdown_filepath, odt_filepath]:
+            if os.path.exists(filepath):
+                try:
+                    os.unlink(filepath)
+                except Exception:
+                    pass
