@@ -82,7 +82,7 @@ st.title("Conversor de PDF para texto (OCR) e Correção de IA")
 st.markdown("Faça o upload de um PDF digitalizado. A IA irá processar o texto, **remover o cabeçalho**, **manter a separação entre os parágrafos** e **não completar palavras incompletas**.")
 
 # NOVO AVISO AQUI
-st.warning("⚠️ **AVISO IMPORTANTE:** Este aplicativo e suas regras de correção com IA (principalmente remoção de cabeçalho e normalização de ortografia arcaica) foram desenvolvidos para uso exclusivo com **PDFs de JORNAIS ANTIGOS (e.g., documentos históricos, edições centenárias)**, onde cabeçalhos são padronizados e a ortografia é inconsistente. **NÃO use com PDFs de jornais ATUAIS,** documentos modernos, ou qualquer outro formato, pois os resultados podem ser inesperados e a remoção de cabeçalho pode falhar ou remover conteúdo essencial.")
+st.warning("⚠️ **AVISO IMPORTANTE:** Este aplicativo só deve ser utilizado para edições antigas do Jornal Minas Gerais. Versões atuais são pesadas e podem fazer o aplicativo parar de funcionar.")
 
 uploaded_file = st.file_uploader("Escolha um arquivo PDF...", type=["pdf"])
 
