@@ -14,6 +14,7 @@ def get_api_key():
     """
     Tenta obter a chave de API das variáveis de ambiente ou secrets do Streamlit.
     """
+    # Preferência: st.secrets.get("GEMINI_API_KEY") ou ambiente.
     # No ambiente Canvas, a chave é fornecida automaticamente no fetch se for string vazia.
     api_key = os.environ.get("GOOGLE_API_KEY") or st.secrets.get("GEMINI_API_KEY")
     return api_key
@@ -25,6 +26,7 @@ def correct_ocr_text(raw_text):
     api_key = get_api_key()
     
     # O Streamlit Canvas injeta a chave automaticamente se for uma string vazia (API Key "").
+    # Mantemos o uso do `requests` para maior compatibilidade.
     apiUrl = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={api_key if api_key else ''}"
     
     system_prompt = """
@@ -34,8 +36,8 @@ def correct_ocr_text(raw_text):
     Regras de correção e normalização (use o Português moderno do Brasil):
     - Corrija falhas de detecção do OCR (ex: 'Asy!o' para 'Asilo', '¢m' para 'em').
     - Normalize ortografias arcaicas como 'Geraes' para 'Gerais', 'Conceigao' para 'Conceição', 'Immaculada' para 'Imaculada', 'sancciono' para 'sanciono', 'uti-lidade' para 'utilidade', 'legaes' para 'legais', 'Asylo' para 'Asilo', 'Collegio' para 'Colégio', 'Gymnasio' para 'Ginásio'.
-    - **APÓS a correção, remova todas as quebras de linha (newlines), retornos de carro e múltiplos espaços, unindo todo o texto em um único parágrafo contínuo.**
-    - **Retorne APENAS o texto corrigido e contínuo**, sem qualquer introdução, explicação ou formatação adicional (como markdown).
+    - Preserve a quebra de linha (newline) e a estrutura básica do texto.
+    - Retorne APENAS o texto corrigido, sem qualquer introdução, explicação ou formatação adicional (como markdown).
     """
 
     payload = {
@@ -54,16 +56,16 @@ def correct_ocr_text(raw_text):
         return corrected_text if corrected_text else raw_text
 
     except requests.exceptions.HTTPError as http_err:
-        st.error(f"Erro HTTP ({http_err.response.status_code}) na correção via Gemini. Exibindo texto bruto.")
+        st.sidebar.error(f"Erro HTTP ({http_err.response.status_code}) na correção via Gemini. Exibindo texto bruto.")
     except Exception as e:
-        st.error(f"Erro inesperado durante a correção via Gemini: {e}. Exibindo texto bruto.")
+        st.sidebar.error(f"Erro inesperado durante a correção via Gemini: {e}. Exibindo texto bruto.")
 
     return raw_text # Fallback: retorna o texto original em caso de falha
 
 
 # --- CORPO PRINCIPAL DO APP ---
 
-# --- TRECHO DE CÓDIGO PARA ROBUSTEZ ---
+# --- NOVO TRECHO DE CÓDIGO PARA ROBUSTEZ ---
 # Usamos shutil.which() para encontrar o caminho completo do executável.
 OCRMypdf_PATH = shutil.which("ocrmypdf")
 
@@ -82,7 +84,7 @@ if not OCRMypdf_PATH:
 
 # --- UI elements ---
 st.title("Processador de PDF com OCR e Correção de IA")
-st.markdown("Faça o upload de um PDF digitalizado para que o OCRmyPDF o processe. O texto extraído será corrigido pela IA e formatado em **linha contínua**.")
+st.markdown("Faça o upload de um PDF digitalizado para que o OCRmyPDF o processe e gere um novo PDF com texto pesquisável. O texto extraído será automaticamente corrigido pela IA.")
 
 uploaded_file = st.file_uploader("Escolha um arquivo PDF...", type=["pdf"])
 
@@ -99,7 +101,7 @@ if uploaded_file is not None:
     try:
         # Comando para rodar o ocrmypdf, usando o caminho COMPLETO para maior segurança
         command = [
-            OCRMypdf_PATH,
+            OCRMypdf_PATH, # Agora usamos a variável com o caminho completo
             "--force-ocr",
             "--sidecar",
             "/tmp/output.txt",
@@ -111,40 +113,32 @@ if uploaded_file is not None:
         process = subprocess.run(command, check=True, capture_output=True, text=True)
         
         st.success("Processo de OCR concluído!")
+        st.code(f"Saída do OCRmyPDF:\n{process.stdout}")
 
-        # Exibir e Corrigir o texto extraído
+        # Baixar o arquivo de saída
+        with open(output_filepath, "rb") as f:
+            st.download_button(
+                label="📥 Baixar PDF Processado",
+                data=f.read(),
+                file_name="ocr_output.pdf",
+                mime="application/pdf"
+            )
+
+        # Exibir a barra lateral com o texto extraído (se disponível)
         if os.path.exists("/tmp/output.txt"):
             with open("/tmp/output.txt", "r") as f:
                 sidecar_text_raw = f.read()
             
-            # --- Tentar correção com Gemini ---
-            st.markdown("---")
-            st.subheader("🤖 Texto Extraído e Corrigido (IA)")
-            
-            with st.spinner("Corrigindo ortografia arcaica, erros de OCR e formatando o texto em linha única com Gemini..."):
+            # --- NOVO: Tentar correção com Gemini ---
+            with st.spinner("Corrigindo ortografia arcaica e erros de OCR com Gemini..."):
                 sidecar_text_corrected = correct_ocr_text(sidecar_text_raw)
 
-            # Exibe o texto corrigido no corpo principal em formato contínuo
-            st.text_area("Texto Contínuo Corrigido (Gemini)", sidecar_text_corrected, height=200, key="corrected_text_final")
+            st.sidebar.subheader("📝 Texto Corrigido (IA)")
+            st.sidebar.text_area("Texto Após Correção (Gemini)", sidecar_text_corrected, height=350, key="corrected_text")
             
-            # Adiciona botão de download para o texto
-            st.download_button(
-                label="⬇️ Baixar Texto Corrigido (.txt)",
-                data=sidecar_text_corrected.encode('utf-8'),
-                file_name="texto_corrigido.txt",
-                mime="text/plain"
-            )
-            
-            st.markdown("---")
-            
-            # Baixar o arquivo de saída (PDF)
-            with open(output_filepath, "rb") as f:
-                st.download_button(
-                    label="📥 Baixar PDF Processado (Pesquisável)",
-                    data=f.read(),
-                    file_name="ocr_output.pdf",
-                    mime="application/pdf"
-                )
+            st.sidebar.markdown("---")
+            st.sidebar.subheader("👀 Texto Bruto (OCR)")
+            st.sidebar.text_area("Texto Bruto do OCRmyPDF", sidecar_text_raw, height=350, key="raw_text")
 
     except subprocess.CalledProcessError as e:
         st.error(f"Erro ao processar o PDF. Detalhes: {e.stderr}")
