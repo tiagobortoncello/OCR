@@ -7,7 +7,7 @@ import requests
 import json
 
 # Define as configurações básicas da página
-st.set_page_config(page_title="Conversor de PDF para texto (OCR) e ODT", layout="centered")
+st.set_page_config(page_title="Conversor de PDF para ODT (Formatado)", layout="centered")
 
 # --- FUNÇÕES PARA A CORREÇÃO DE TEXTO COM GEMINI ---
 
@@ -92,7 +92,7 @@ if not OCRMypdf_PATH or not PANDOC_PATH:
     st.stop()
 
 # Título do App
-st.title("Conversor de PDF para texto (OCR) e ODT")
+st.title("Conversor de PDF para ODT (LibreOffice)")
 
 # Aviso
 st.warning("⚠️ **AVISO IMPORTANTE:** Este aplicativo só deve ser utilizado para edições antigas do Jornal Minas Gerais. Versões atuais são pesadas e podem fazer o aplicativo parar de funcionar devido aos limites de recursos.")
@@ -113,35 +113,33 @@ if uploaded_file is not None:
 
     try:
         # 1. Execução do OCRMypdf (Extração de texto bruto)
-        command_ocr = [
-            OCRMypdf_PATH,
-            "--force-ocr",
-            "--sidecar",
-            markdown_filepath, 
-            input_filepath,
-            output_ocr_filepath
-        ]
-        
-        subprocess.run(command_ocr, check=True, capture_output=True, text=True)
-        
-        st.success("Processo de OCR concluído!")
+        with st.spinner("1/3: Extraindo texto bruto do PDF com OCR..."):
+            command_ocr = [
+                OCRMypdf_PATH,
+                "--force-ocr",
+                "--sidecar",
+                markdown_filepath, 
+                input_filepath,
+                output_ocr_filepath
+            ]
+            
+            subprocess.run(command_ocr, check=True, capture_output=True, text=True)
+            st.success("Extração de texto concluída.")
 
         if os.path.exists(markdown_filepath):
             with open(markdown_filepath, "r") as f:
                 sidecar_text_raw = f.read()
             
-            st.markdown("---")
-            st.subheader("🤖 Texto Extraído e Corrigido (IA)")
-            
-            with st.spinner("Removendo cabeçalho, corrigindo ortografia arcaica e formatando o texto em Markdown..."):
+            # 2. Execução do Gemini (Correção e formatação Markdown)
+            with st.spinner("2/3: Corrigindo ortografia arcaica, removendo cabeçalhos e formatando tabelas via IA..."):
                 sidecar_text_corrected = correct_ocr_text(sidecar_text_raw)
             
             # Sobrescreve o arquivo .md com o texto corrigido pelo Gemini
             with open(markdown_filepath, "w", encoding='utf-8') as f:
                 f.write(sidecar_text_corrected)
 
-            # 2. Execução do Pandoc (Conversão de MD para ODT)
-            with st.spinner("Convertendo Markdown formatado (com tabelas) para arquivo ODT do LibreOffice..."):
+            # 3. Execução do Pandoc (Conversão de MD para ODT)
+            with st.spinner("3/3: Convertendo Markdown para arquivo ODT do LibreOffice..."):
                 command_pandoc = [
                     PANDOC_PATH,
                     "--standalone", 
@@ -153,43 +151,21 @@ if uploaded_file is not None:
                 subprocess.run(command_pandoc, check=True, capture_output=True, text=True)
                 st.success("Conversão para ODT concluída! Seu documento está pronto para download.")
 
-            # 3. Exibição e Download dos Arquivos
-            st.info("O texto abaixo está formatado em **Markdown**. Tabelas e parágrafos foram reestruturados.")
-            st.markdown(sidecar_text_corrected, unsafe_allow_html=False)
-            
             st.markdown("---")
+            st.subheader("✅ Processo Finalizado com Sucesso")
+            st.info("O download abaixo contém o texto corrigido, com ortografia normalizada e tabelas reestruturadas, pronto para edição no LibreOffice Writer.")
             
             # Download do ODT formatado (tabelas inclusas, ideal para LibreOffice)
             with open(odt_filepath, "rb") as f:
                 st.download_button(
                     label="⬇️ Baixar Documento Formatado (.odt)",
                     data=f.read(),
-                    file_name="documento_final.odt",
+                    file_name="documento_final_formatado.odt",
                     mime="application/vnd.oasis.opendocument.text"
                 )
             
             st.markdown("---")
-            st.subheader("Código Fonte (Markdown para inspeção)")
-            st.code(sidecar_text_corrected, language="markdown")
-            
-            # Download do MD (como backup)
-            st.download_button(
-                label="Baixar Texto Corrigido (Formato Markdown .md)",
-                data=sidecar_text_corrected.encode('utf-8'),
-                file_name="texto_corrigido_formatado.md",
-                mime="text/markdown"
-            )
-            
-            st.markdown("---")
-            
-            # Download do PDF pesquisável
-            with open(output_ocr_filepath, "rb") as f:
-                st.download_button(
-                    label="📥 Baixar PDF Processado (Pesquisável)",
-                    data=f.read(),
-                    file_name="ocr_output.pdf",
-                    mime="application/pdf"
-                )
+
 
     except subprocess.CalledProcessError as e:
         # Captura erros tanto do OCRMypdf quanto do Pandoc
@@ -202,6 +178,8 @@ if uploaded_file is not None:
         for filepath in [input_filepath, output_ocr_filepath, markdown_filepath, odt_filepath]:
             if os.path.exists(filepath):
                 try:
-                    os.unlink(filepath)
+                    # Verifica se o arquivo existe antes de tentar apagar
+                    if filepath and os.path.exists(filepath):
+                        os.unlink(filepath)
                 except Exception:
                     pass
