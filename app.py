@@ -79,7 +79,7 @@ if not OCRMypdf_PATH:
 
 # NOVO TÍTULO AQUI
 st.title("Conversor de PDF para texto (OCR) e Correção de IA")
-st.markdown("Faça o upload de um PDF digitalizado. A IA irá processar o texto, **remover o cabeçalho**, **manter a separação entre os parágrafos** e **não completar palavras incompletas**.")
+# A LINHA st.markdown("Faça o upload de um PDF digitalizado. A IA irá processar o texto, **remover o cabeçalho**, **manter a separação entre os parágrafos** e **não completar palavras incompletas**.") FOI REMOVIDA.
 
 # NOVO AVISO AQUI
 st.warning("⚠️ **AVISO IMPORTANTE:** Este aplicativo só deve ser utilizado para edições antigas do Jornal Minas Gerais. Versões atuais são pesadas e podem fazer o aplicativo parar de funcionar.")
