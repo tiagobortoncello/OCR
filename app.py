@@ -2,8 +2,26 @@ import streamlit as st
 import subprocess
 import tempfile
 import os
+import shutil # Importação adicionada
 
 st.set_page_config(page_title="Processador de PDF com OCR", layout="centered")
+
+# --- NOVO TRECHO DE CÓDIGO PARA ROBUSTEZ ---
+# Usamos shutil.which() para encontrar o caminho completo do executável.
+OCRMypdf_PATH = shutil.which("ocrmypdf")
+
+if not OCRMypdf_PATH:
+    # Se o caminho não for encontrado, o erro é mais claro.
+    st.error("""
+        O executável **'ocrmypdf' não foi encontrado** no ambiente do Streamlit Cloud.
+        Isso pode ser uma falha temporária na instalação das dependências de sistema.
+        
+        **Ações recomendadas:**
+        1. Confirme se o arquivo `packages.txt` contém apenas `ocrmypdf`.
+        2. Force um **restart ou re-deploy** do seu aplicativo no Streamlit Cloud para forçar uma nova instalação.
+    """)
+    st.stop()
+# ---------------------------------------------
 
 # --- UI elements ---
 st.title("Processador de PDF com OCR")
@@ -22,10 +40,9 @@ if uploaded_file is not None:
     output_filepath = os.path.join(tempfile.gettempdir(), "output_ocr.pdf")
 
     try:
-        # Comando para rodar o ocrmypdf
-        # O argumento '--force-ocr' garante que o OCR seja executado mesmo em PDFs que já contenham texto
+        # Comando para rodar o ocrmypdf, usando o caminho COMPLETO para maior segurança
         command = [
-            "ocrmypdf",
+            OCRMypdf_PATH, # Agora usamos a variável com o caminho completo
             "--force-ocr",
             "--sidecar",
             "/tmp/output.txt",
@@ -57,6 +74,7 @@ if uploaded_file is not None:
 
     except subprocess.CalledProcessError as e:
         st.error(f"Erro ao processar o PDF. Detalhes: {e.stderr}")
+        st.code(f"Comando tentado: {' '.join(command)}")
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado: {e}")
     finally:
